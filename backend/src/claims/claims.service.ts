@@ -101,14 +101,24 @@ export class ClaimsService {
     };
   }
 
-  /** 상태 전이 — 사용자 신고 기반. 시스템이 제출을 수행하는 전이는 없다. */
+  /**
+   * 상태 전이 — 사용자 신고 기반. 시스템이 제출을 수행하는 전이는 없다.
+   * SUBMITTED_BY_USER 신고는 어느 준비 단계에서든 가능(자기 보고).
+   * PAID 진입은 실지급액이 필수이므로 confirmPaid() 전용 — PATCH 로는 불가(정확도 루프 §7.1).
+   */
   updateStatus(userId: string, claimId: string, status: ClaimStatus): Claim {
     const claim = this.getOwned(userId, claimId);
+    if (status === 'PAID') {
+      throw new BadRequestException({
+        code: 'USE_PAID_ENDPOINT',
+        message: '지급 확인은 실지급액과 함께 POST /claims/:id/paid 로 기록해 주세요.',
+      });
+    }
     const allowed: Record<ClaimStatus, ClaimStatus[]> = {
       PREPARING: ['IN_REVIEW', 'READY_TO_SUBMIT', 'SUBMITTED_BY_USER', 'CANCELLED'],
-      IN_REVIEW: ['READY_TO_SUBMIT', 'CANCELLED'],
+      IN_REVIEW: ['READY_TO_SUBMIT', 'SUBMITTED_BY_USER', 'CANCELLED'],
       READY_TO_SUBMIT: ['SUBMITTED_BY_USER', 'CANCELLED'],
-      SUBMITTED_BY_USER: ['PAID', 'CANCELLED'],
+      SUBMITTED_BY_USER: ['CANCELLED'],
       PAID: [],
       CANCELLED: [],
     };

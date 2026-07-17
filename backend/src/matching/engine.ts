@@ -48,8 +48,10 @@ export function matchRecord(
     return { ...base, verdict: 'NOT_CLAIMABLE', reason: 'outside_coverage_period' };
   }
 
-  // 3. 소멸시효(진료일 + 3년) 경과
-  if (statuteExpiryDate(t).getTime() < today.getTime()) {
+  // 3. 소멸시효(진료일 + 3년) 경과 — 만료일 당일까지는 청구 가능(날짜 단위 비교)
+  const expiryIso = statuteExpiryDate(t).toISOString().slice(0, 10);
+  const todayIso = today.toISOString().slice(0, 10);
+  if (todayIso > expiryIso) {
     return { ...base, verdict: 'NOT_CLAIMABLE', reason: 'statute_expired' };
   }
 
@@ -69,7 +71,11 @@ export function matchRecord(
     return { ...base, verdict: 'NOT_CLAIMABLE', reason: 'no_copay' };
   }
 
+  // 회당 한도 적용 단위: 1~3세대는 급여+비급여 통합 담보(단일 한도), 4세대는 담보 분리(파트별 한도)
+  const sharedLimit = gen <= 3;
+
   let total = 0;
+  let sharedLimitValue: number | undefined;
   const formulaParts: string[] = [];
 
   for (const part of parts) {
@@ -85,14 +91,29 @@ export function matchRecord(
     const proportional = Math.floor(part.amount * rule.coinsuranceRate);
     const deduction = Math.max(fixed, proportional);
     let refund = Math.max(0, part.amount - deduction);
-    if (rule.perVisitLimit !== undefined) refund = Math.min(refund, rule.perVisitLimit);
-    total += refund;
 
     const catLabel = part.category === 'COVERED' ? '급여' : '비급여';
-    formulaParts.push(
+    let partFormula =
       `${gen}세대 ${claimTypeLabel(record.claimType)}(${catLabel}): ` +
-        `${fmt(part.amount)} − max(${fmt(fixed)}, ${fmt(part.amount)}×${rule.coinsuranceRate * 100}%) = ${fmt(refund)}`,
-    );
+      `${fmt(part.amount)} − max(${fmt(fixed)}, ${fmt(part.amount)}×${rule.coinsuranceRate * 100}%) = ${fmt(refund)}`;
+
+    if (sharedLimit) {
+      if (rule.perVisitLimit !== undefined) sharedLimitValue = rule.perVisitLimit;
+    } else if (rule.perVisitLimit !== undefined && refund > rule.perVisitLimit) {
+      // 4세대: 파트(담보)별 한도 — 한도 발동 시 수식에 한도 항 포함 (§7.3 산출 근거 정합)
+      partFormula += ` → 회당 한도 min(${fmt(rule.perVisitLimit)}, ${fmt(refund)}) = ${fmt(rule.perVisitLimit)}`;
+      refund = rule.perVisitLimit;
+    }
+
+    total += refund;
+    formulaParts.push(partFormula);
+  }
+
+  let formula = formulaParts.join(' + ');
+  if (sharedLimit && sharedLimitValue !== undefined && total > sharedLimitValue) {
+    // 2·3세대: 합산액에 회당 한도 1회 적용
+    formula += ` → 회당 한도 min(${fmt(sharedLimitValue)}, ${fmt(total)}) = ${fmt(sharedLimitValue)}`;
+    total = sharedLimitValue;
   }
 
   if (total <= 0) {
@@ -103,7 +124,7 @@ export function matchRecord(
     ...base,
     verdict: 'CLAIMABLE',
     estimatedAmount: total,
-    formula: `${formulaParts.join(' + ')} [rule ${RULE_VERSION}]`,
+    formula: `${formula} [rule ${RULE_VERSION}]`,
   };
 }
 

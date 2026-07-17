@@ -87,13 +87,47 @@ describe('담보 매칭 엔진', () => {
     expect(r.estimatedAmount).toBeUndefined();
   });
 
-  it('회당 한도를 초과하는 환급액은 한도로 상한된다', () => {
+  it('회당 한도를 초과하는 환급액은 한도로 상한되고, 한도 항이 수식에 포함된다', () => {
     const r = matchRecord(
       record({ copayCovered: 1000000, hospitalTier: 'CLINIC' }),
       contract({ silsonGeneration: 3 }),
       TODAY,
     );
     expect(r.estimatedAmount).toBe(250000); // perVisitLimit
+    expect(r.formula).toContain('회당 한도 min(250,000');
+  });
+
+  it('2·3세대 통원은 급여+비급여 합산액에 회당 한도를 1회만 적용한다(파트별 2배 부풀림 금지)', () => {
+    const r = matchRecord(
+      record({ copayCovered: 200000, copayUncovered: 200000, hospitalTier: 'CLINIC' }),
+      contract({ silsonGeneration: 3 }),
+      TODAY,
+    );
+    // 급여: 200,000 - max(10,000, 10%=20,000) = 180,000
+    // 비급여: 200,000 - max(10,000, 20%=40,000) = 160,000
+    // 합산 340,000 → 통합 담보 한도 250,000 으로 1회 상한 (500,000 이 아님)
+    expect(r.estimatedAmount).toBe(250000);
+    expect(r.formula).toContain('회당 한도 min(250,000, 340,000)');
+  });
+
+  it('4세대는 급여/비급여 담보가 분리되어 파트별로 한도를 적용한다', () => {
+    const r = matchRecord(
+      record({ copayCovered: 500000, copayUncovered: 500000, hospitalTier: 'CLINIC' }),
+      contract({ silsonGeneration: 4 }),
+      TODAY,
+    );
+    // 급여: 500,000 - max(10,000, 20%=100,000) = 400,000 → 한도 200,000
+    // 비급여: 500,000 - max(30,000, 30%=150,000) = 350,000 → 한도 200,000
+    expect(r.estimatedAmount).toBe(400000);
+  });
+
+  it('소멸시효 만료일 당일까지는 청구 가능하다(오프바이원 방지)', () => {
+    // 진료일 2023-07-17 → 만료일 2026-07-17 = TODAY → 아직 유효
+    const ok = matchRecord(record({ treatmentDate: '2023-07-17' }), contract(), TODAY);
+    expect(ok.verdict).toBe('CLAIMABLE');
+    // 진료일 2023-07-16 → 만료일 2026-07-16 < TODAY → 만료
+    const expired = matchRecord(record({ treatmentDate: '2023-07-16' }), contract(), TODAY);
+    expect(expired.reason).toBe('statute_expired');
   });
 
   it('소멸시효(진료일+3년) 경과 건은 NOT_CLAIMABLE(statute_expired)', () => {

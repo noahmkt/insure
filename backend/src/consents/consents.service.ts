@@ -44,6 +44,13 @@ export class ConsentsService {
     return record;
   }
 
+  /**
+   * 철회 — append-only 이력 기록과 함께, 안내 문구(WITHDRAW_IMPACTS)가 약속한
+   * 후속 조치를 실제로 실행한다:
+   *   ② SENSITIVE_HEALTH → 저장된 진료내역 즉시 파기
+   *   ③ THIRD_PARTY      → 진행 중 상담 종료(배정 해제)
+   *   ① PERSONAL_INFO    → 회원 탈퇴(계정 파기) 동반
+   */
   withdraw(userId: string, type: ConsentType): { impacts: string } {
     this.store.consents.push({
       id: this.store.nextConsentId(),
@@ -54,6 +61,20 @@ export class ConsentsService {
       method: 'CHECKBOX',
       occurredAt: new Date(),
     });
+
+    switch (type) {
+      case 'SENSITIVE_HEALTH':
+        this.store.purgeMedicalData(userId);
+        break;
+      case 'THIRD_PARTY':
+        this.store.cancelActiveConsultations(userId);
+        break;
+      case 'PERSONAL_INFO':
+        this.store.purgeAccount(userId);
+        break;
+      case 'MARKETING':
+        break;
+    }
     return { impacts: WITHDRAW_IMPACTS[type] };
   }
 

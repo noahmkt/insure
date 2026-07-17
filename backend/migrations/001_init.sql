@@ -89,6 +89,8 @@ CREATE TABLE medical.medical_records (
     user_id         UUID NOT NULL,                 -- FK는 논리적(스키마 분리 유지)
     hospital_id     UUID,
     enc_hospital_name BYTEA NOT NULL,
+    hospital_tier   TEXT NOT NULL DEFAULT 'CLINIC' CHECK (hospital_tier IN
+                      ('CLINIC','HOSPITAL','GENERAL','TERTIARY','PHARMACY')), -- 수신 시점 종별 스냅샷(공제 계산 입력)
     treatment_date  DATE NOT NULL,
     claim_type      TEXT NOT NULL CHECK (claim_type IN ('OUTPATIENT','INPATIENT','PHARMACY')),
     enc_detail      BYTEA,                         -- 상병·처방 등 상세(암호화 JSON)

@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { ApiExceptionFilter } from './common/http/api-exception.filter';
 import { maskRrnDeep } from './common/logging/rrn-mask';
 
 async function bootstrap(): Promise<void> {
@@ -14,6 +15,7 @@ async function bootstrap(): Promise<void> {
       verbose(msg: unknown) { console.log(maskRrnDeep(msg)); }
     })(),
   });
+  app.useGlobalFilters(new ApiExceptionFilter());
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port);
   console.log(`insure-backend listening on :${port}`);

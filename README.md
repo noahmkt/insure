@@ -16,7 +16,8 @@ insure/
 │   ├── 06-consent-forms.md     # 동의서 4종 문구 초안 (법무 검수 전제)
 │   └── 07-sprint-backlog.md    # Phase 1 스프린트 백로그 (2주 단위)
 ├── backend/                    # NestJS 백엔드 API 서버 (Phase 1 코어 구현)
-└── app/                        # Flutter 고객용 앱 스캐폴드 (5탭 구조)
+├── app/                        # Flutter 고객용 앱 스캐폴드 (온보딩 + 5탭)
+└── admin/                      # React 운영 관리자 웹 (Vite, RBAC 4롤 데모)
 ```
 
 ## 법적 하드 룰 (요약 — 전체는 docs/01-prd.md §3)
@@ -38,15 +39,21 @@ insure/
 - 예측액 응답 DTO는 `disclaimer` 필드가 항상 포함되도록 직렬화 단계에서 강제.
 - 제3자 제공 동의(`THIRD_PARTY`)가 없는 사용자의 상담 신청은 API 레벨에서 409로 거부.
 
-## 빠른 시작 (백엔드)
+## 빠른 시작
 
 ```bash
+# 백엔드 (http://localhost:3000)
 cd backend
 npm install
-npm run build        # TypeScript 컴파일
-npm test             # 담보 매칭 엔진 등 단위 테스트
-docker compose up -d # PostgreSQL (로컬 개발)
+npm run build && npm test   # 컴파일 + 테스트 (매칭 엔진·하드 룰 게이트 41케이스)
+docker compose up -d        # PostgreSQL (선택 — migrations/ 자동 적용)
 npm run start:dev
+
+# 관리자 웹 (http://localhost:5174, 백엔드 미기동 시 목데이터 폴백)
+cd admin && npm install && npm run dev
+
+# 고객 앱 (Flutter SDK 필요 — app/README.md 참조)
+cd app && flutter pub get && flutter run
 ```
 
 ## Phase 로드맵

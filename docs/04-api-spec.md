@@ -28,8 +28,9 @@
 | DELETE | `/consents/:type` | 철회 — 응답에 기능 영향 범위(`impacts`) 포함 |
 
 - `type ∈ PERSONAL_INFO | SENSITIVE_HEALTH | THIRD_PARTY | MARKETING`
-- `THIRD_PARTY` 는 상담 신청 플로우에서만 부여 가능(`context` 에 신청 건 연결). 포괄 부여 시 400.
+- `THIRD_PARTY` 는 공개 `POST /consents` 로 부여 불가(400) — 상담 신청(`POST /consultations`) 플로우에서만 신청 건 `context` 와 함께 수집된다. 포괄 동의 금지.
 - 민감정보 API(진료내역·매칭)는 `SENSITIVE_HEALTH` 유효 동의 없으면 `403 CONSENT_REQUIRED`.
+- 철회는 안내된 후속 조치를 즉시 실행한다: ② 철회 → 진료내역 파기, ③ 철회 → 진행 중 상담 종료, ① 철회 → 회원 탈퇴 동반.
 
 ## 3. 데이터 연동 (비동기 잡)
 
@@ -100,7 +101,8 @@
 | POST | `/consultations` | 상담 신청 `{kind: POLICY_REVIEW|ADJUSTER_REVIEW, thirdPartyConsent:{documentVersion,method}}` |
 | GET | `/consultations` | 내 상담 내역(배정 담당자·상태) |
 
-- `thirdPartyConsent` 가 요청 본문에 없고 유효 동의도 없으면 `409 THIRD_PARTY_CONSENT_REQUIRED` — 동의는 신청 시점에만 수집.
+- `thirdPartyConsent` 는 **매 신청 건마다 필수** — 본문에 없으면 `409 THIRD_PARTY_CONSENT_REQUIRED`. 기존 동의로 대체할 수 없다(신청 건별 클릭 시점 동의 원칙, 하드 룰 4).
+- 배정(리드 전달) 시점에 동의 유효성을 재확인하며, 철회 상태면 배정 거부 + 상담 종료(`409 THIRD_PARTY_CONSENT_WITHDRAWN`).
 
 ## 8. 알림 / 마이
 
@@ -117,6 +119,7 @@
 | GET | `/admin/consultations` | OPERATOR, CONSULTANT | 상담 큐 |
 | POST | `/admin/consultations/:id/assign` | OPERATOR | 담당자 배정(리드 전달 시 ③동의 증적 자동 첨부) |
 | GET | `/admin/claims/:id/documents/:docId/view` | 배정 담당자만 | 뷰어 전용(다운로드 금지) + 감사 로그 기록 |
+| GET | `/admin/users/:userId/medical` | CONSULTANT, ADJUSTER 중 배정 담당자만 | 진료내역 열람 — 대상 사용자의 ② 동의 유효 시에만(철회 후 403) + 전건 감사 로그 |
 | POST | `/admin/claims/:id/fix-request` | CONSULTANT, ADJUSTER | 보완 요청(고객 푸시) |
 | CRUD | `/admin/document-matrix` | OPERATOR | 필요서류 매트릭스 |
 | CRUD | `/admin/matching-parameters` | OPERATOR | 세대별 공제 파라미터(버전 이력) |
@@ -152,3 +155,9 @@ interface InsuranceContractProvider {
 
 - `ci` 는 호출 시 복호화되어 메모리에서만 사용. 어댑터가 주민번호를 요구하는 경우 pass-through 파라미터로만 전달하고 어떤 경로(로그·APM·백업)에도 기록하지 않는다.
 - 소스별 헬스체크 실패 시: 사용자 안내 배너 + 재시도 큐. 코어 기능(기수신 데이터 열람)은 격리되어 계속 동작.
+
+## 11. 구현 현황 (Phase 1 코어 기준)
+
+구현 완료: 인증/탈퇴, 동의 4층(부여·철회·후속 조치), 연동(동기 데모), 내 보험(리스트·중복 감지), 환급금(확정/예측 분리), 간편청구(라우팅·체크리스트·패키지·상태·지급확인), 상담 신청/배정, 관리자(민감정보 열람 게이트·감사 로그·정확도 집계).
+
+Phase 1 백로그(명세 선행 정의, 미구현): `POST /auth/refresh`, 비동기 잡 API(`GET /sync/jobs/:id`, 콜백)와 캐싱 `cached:true`, `GET /contracts/:id`, 병원 수동 추가, 서류 업로드/OCR(`POST /claims/:id/documents`), `review-request`, `sign`, 알림 API, 보관함(`/me/vault`), 관리자 대시보드·상담 큐 조회·보완 요청·매트릭스/파라미터 CRUD.

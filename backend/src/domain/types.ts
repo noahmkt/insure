@@ -33,6 +33,19 @@ export interface ConsentRecord {
   occurredAt: Date;
 }
 
+/** 담보 (core.contract_coverages) — 'BOTH' 는 급여+비급여 통합 담보(1~3세대 통원 등) */
+export interface ContractCoverage {
+  id: string;
+  contractId: string;
+  coverageName: string;
+  claimType?: ClaimType;
+  benefitCategory?: BenefitCategory | 'BOTH';
+  perVisitLimit?: number;
+  annualLimit?: number;
+  deductibleFixed?: number;
+  coinsuranceRate?: number;
+}
+
 export interface InsuranceContract {
   id: string;
   userId: string;

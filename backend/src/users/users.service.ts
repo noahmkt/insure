@@ -45,17 +45,12 @@ export class UsersService {
     return user;
   }
 
-  /** 회원 탈퇴 — 즉시 파기 + 법정 보존분 분리(운영: 파기 배치) */
+  /**
+   * 회원 탈퇴 — 즉시 파기(진료내역·계약·청구·리드·PII 소거) + 법정 보존분 분리.
+   * 동의 이력·감사 로그는 법정 보존 대상으로 유지된다.
+   */
   withdraw(userId: string): { purged: true } {
-    const user = this.store.users.find((u) => u.id === userId);
-    if (user) {
-      user.status = 'WITHDRAWN';
-      this.store.medicalRecords = this.store.medicalRecords.filter((r) => r.userId !== userId);
-      this.store.contracts = this.store.contracts.filter((c) => c.userId !== userId);
-      this.store.confirmedBenefits = this.store.confirmedBenefits.filter(
-        (b) => b.userId !== userId,
-      );
-    }
+    this.store.purgeAccount(userId);
     return { purged: true };
   }
 }

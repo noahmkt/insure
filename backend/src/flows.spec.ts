@@ -113,6 +113,25 @@ describe('간편청구 라우팅', () => {
     expect(paid.status).toBe('PAID');
     expect(paid.actualPaidAmount).toBe(30000); // 정확도 루프 축적
   });
+
+  it('PATCH 로는 PAID 진입 불가 — 실지급액 없는 종결을 막는다 (§7.1 정확도 루프)', async () => {
+    const { store, claims, userId } = await withData();
+    const records = store.medicalRecords.filter((r) => r.userId === userId).slice(0, 1);
+    const claim = claims.create(userId, records.map((r) => r.id));
+    claims.updateStatus(userId, claim.id, 'SUBMITTED_BY_USER');
+    expect(() => claims.updateStatus(userId, claim.id, 'PAID')).toThrow(
+      expect.objectContaining({ response: expect.objectContaining({ code: 'USE_PAID_ENDPOINT' }) }),
+    );
+  });
+
+  it('IN_REVIEW 상태에서도 본인 제출 신고(SUBMITTED_BY_USER)가 가능하다', async () => {
+    const { store, claims, userId } = await withData();
+    const records = store.medicalRecords.filter((r) => r.userId === userId).slice(0, 1);
+    const claim = claims.create(userId, records.map((r) => r.id));
+    claims.updateStatus(userId, claim.id, 'IN_REVIEW');
+    const updated = claims.updateStatus(userId, claim.id, 'SUBMITTED_BY_USER');
+    expect(updated.status).toBe('SUBMITTED_BY_USER');
+  });
 });
 
 describe('상담(리드)와 동의 4층', () => {
@@ -153,6 +172,59 @@ describe('상담(리드)와 동의 4층', () => {
     expect(consents.hasActive(userId, 'SENSITIVE_HEALTH')).toBe(false);
     expect(consents.history(userId).length).toBe(2); // GRANT + WITHDRAW 모두 보존
   });
+
+  it('② 민감정보 동의 철회 시 저장된 진료내역이 즉시 파기된다 (하드 룰 3·5)', async () => {
+    const { store, consents, sync, userId } = setup();
+    consents.grant(userId, 'SENSITIVE_HEALTH', 'consent-sensitive-v1', 'CHECKBOX');
+    await sync.syncMedical(userId);
+    expect(store.medicalRecords.filter((r) => r.userId === userId).length).toBeGreaterThan(0);
+
+    consents.withdraw(userId, 'SENSITIVE_HEALTH');
+    expect(store.medicalRecords.filter((r) => r.userId === userId)).toHaveLength(0);
+  });
+
+  it('③ 제3자 제공 동의 철회 시 진행 중 상담이 종료된다 (하드 룰 4)', () => {
+    const { consents, consultations, userId } = setup();
+    const c = consultations.request(userId, 'POLICY_REVIEW', {
+      documentVersion: 'consent-thirdparty-v1',
+      method: 'CHECKBOX',
+    });
+    consents.withdraw(userId, 'THIRD_PARTY');
+    expect(c.status).toBe('CANCELLED');
+    expect(c.assignedStaffId).toBeUndefined();
+  });
+
+  it('① 수집·이용 동의 철회는 회원 탈퇴(계정 파기)를 동반한다', async () => {
+    const { store, consents, sync, userId } = setup();
+    consents.grant(userId, 'SENSITIVE_HEALTH', 'consent-sensitive-v1', 'CHECKBOX');
+    await sync.syncContracts(userId);
+    await sync.syncMedical(userId);
+
+    consents.withdraw(userId, 'PERSONAL_INFO');
+    const user = store.users.find((u) => u.id === userId)!;
+    expect(user.status).toBe('WITHDRAWN');
+    expect(user.name).toBe(''); // PII 소거
+    expect(user.phone).toBe('');
+    expect(store.medicalRecords.filter((r) => r.userId === userId)).toHaveLength(0);
+    expect(store.contracts.filter((c) => c.userId === userId)).toHaveLength(0);
+  });
+
+  it('탈퇴 시 청구건·상담(리드)·PII 까지 파기된다', async () => {
+    const { store, users, consents, sync, claims, consultations, userId } = setup();
+    consents.grant(userId, 'SENSITIVE_HEALTH', 'consent-sensitive-v1', 'CHECKBOX');
+    await sync.syncContracts(userId);
+    await sync.syncMedical(userId);
+    const records = store.medicalRecords.filter((r) => r.userId === userId).slice(0, 1);
+    claims.create(userId, records.map((r) => r.id));
+    consultations.request(userId, 'POLICY_REVIEW', {
+      documentVersion: 'consent-thirdparty-v1',
+      method: 'CHECKBOX',
+    });
+
+    users.withdraw(userId);
+    expect(store.claims.filter((c) => c.userId === userId)).toHaveLength(0);
+    expect(store.consultations.filter((c) => c.userId === userId)).toHaveLength(0);
+  });
 });
 
 describe('관리자 민감정보 접근 통제', () => {
@@ -172,5 +244,81 @@ describe('관리자 민감정보 접근 통제', () => {
     audit.record('staff-1', 'VIEW_MEDICAL', userId, 'medical.medical_records');
     expect(store.auditLogs.length).toBe(1);
     expect(store.auditLogs[0].action).toBe('VIEW_MEDICAL');
+  });
+});
+
+describe('API 컨트롤러 레벨 게이트', () => {
+  function controllerSetup() {
+    const ctx = setup();
+    const { ApiController } = require('./api.controller');
+    const { ContractsService } = require('./contracts/contracts.service');
+    const controller = new ApiController(
+      ctx.users,
+      ctx.consents,
+      ctx.sync,
+      new ContractsService(ctx.store),
+      ctx.refunds,
+      ctx.claims,
+      ctx.consultations,
+      ctx.audit,
+      ctx.store,
+    );
+    return { ...ctx, controller };
+  }
+
+  it('공개 POST /consents 로 ③ 제3자 제공 동의를 직접 부여할 수 없다 (우회 차단)', () => {
+    const { controller, userId } = controllerSetup();
+    expect(() =>
+      controller.grantConsent(
+        { type: 'THIRD_PARTY', documentVersion: 'v1', method: 'CHECKBOX', context: 'CONSULT_REQUEST:fake' },
+        `Bearer ${userId}`,
+      ),
+    ).toThrow(
+      expect.objectContaining({ response: expect.objectContaining({ code: 'BLANKET_CONSENT_FORBIDDEN' }) }),
+    );
+  });
+
+  it('관리자 진료내역 열람은 대상 사용자의 ② 동의가 철회되면 403 (하드 룰 3)', async () => {
+    const { controller, consents, sync, consultations, userId } = controllerSetup();
+    consents.grant(userId, 'SENSITIVE_HEALTH', 'consent-sensitive-v1', 'CHECKBOX');
+    await sync.syncMedical(userId);
+    const c = consultations.request(userId, 'ADJUSTER_REVIEW', {
+      documentVersion: 'consent-thirdparty-v1',
+      method: 'CHECKBOX',
+    });
+    c.assignedStaffId = 'staff-1';
+
+    // 동의 유효 + 배정 담당자 → 열람 가능
+    expect(controller.viewMedical(userId, 'staff-1', 'ADJUSTER')).toBeDefined();
+
+    consents.withdraw(userId, 'SENSITIVE_HEALTH');
+    expect(() => controller.viewMedical(userId, 'staff-1', 'ADJUSTER')).toThrow(
+      expect.objectContaining({ response: expect.objectContaining({ code: 'CONSENT_REQUIRED' }) }),
+    );
+  });
+
+  it('③ 동의 철회 후 리드 배정 시도는 409 + 상담 종료 (하드 룰 4)', () => {
+    const { controller, store, consents, consultations, userId } = controllerSetup();
+    const c = consultations.request(userId, 'POLICY_REVIEW', {
+      documentVersion: 'consent-thirdparty-v1',
+      method: 'CHECKBOX',
+    });
+    // 철회가 상담을 이미 CANCELLED 처리하지만, 레이스 대비 배정 시점 재확인도 검증한다
+    consents.withdraw(userId, 'THIRD_PARTY');
+    c.status = 'REQUESTED'; // 배정 시점 게이트 단독 검증을 위해 상태 복원
+    expect(() =>
+      controller.assignConsultation(c.id, { staffId: 'staff-1' }, 'OPERATOR'),
+    ).toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({ code: 'THIRD_PARTY_CONSENT_WITHDRAWN' }),
+      }),
+    );
+    expect(store.consultations.find((x) => x.id === c.id)?.status).toBe('CANCELLED');
+  });
+
+  it('감사 로그는 AUDITOR 전용이다 (docs/04 §9)', () => {
+    const { controller } = controllerSetup();
+    expect(() => controller.auditLogs('OPERATOR')).toThrow();
+    expect(controller.auditLogs('AUDITOR')).toEqual([]);
   });
 });

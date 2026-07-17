@@ -19,7 +19,12 @@ import { RefundsService } from './refunds/refunds.service';
 import { StoreService } from './store/store.service';
 import { SyncService } from './sync/sync.service';
 import { UsersService } from './users/users.service';
-import { ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 
 /**
  * REST API (docs/04-api-spec.md) — Phase 1 코어 엔드포인트.
@@ -70,6 +75,14 @@ export class ApiController {
     @Headers('authorization') auth?: string,
   ) {
     const user = this.users.requireUser(auth);
+    // ③ 제3자 제공 동의는 공개 API 로 직접 부여할 수 없다 — 상담 신청 플로우
+    // (POST /consultations) 클릭 시점에만 수집된다 (하드 룰 4, 포괄 동의 우회 차단)
+    if (body.type === 'THIRD_PARTY') {
+      throw new BadRequestException({
+        code: 'BLANKET_CONSENT_FORBIDDEN',
+        message: '제3자 제공 동의는 상담 신청 시점에만 받을 수 있습니다.',
+      });
+    }
     return this.consents.grant(user.id, body.type, body.documentVersion, body.method, body.context);
   }
 
@@ -207,12 +220,22 @@ export class ApiController {
   ) {
     this.requireRole(role, ['OPERATOR']);
     const consultation = this.store.consultations.find((c) => c.id === id);
-    if (consultation) {
-      consultation.status = 'ASSIGNED';
-      consultation.assignedStaffId = body.staffId;
+    if (!consultation) {
+      throw new NotFoundException({ code: 'CONSULTATION_NOT_FOUND', message: '상담 건이 없습니다.' });
     }
+    // 배정(리드 전달) 시점에 ③ 동의 유효성 재확인 — 신청 후 철회됐다면 리드 전달 금지(하드 룰 4)
+    if (!this.consents.hasActive(consultation.userId, 'THIRD_PARTY')) {
+      consultation.status = 'CANCELLED';
+      consultation.assignedStaffId = undefined;
+      throw new ConflictException({
+        code: 'THIRD_PARTY_CONSENT_WITHDRAWN',
+        message: '고객이 제3자 제공 동의를 철회하여 상담이 종료 처리되었습니다. 리드를 전달할 수 없습니다.',
+      });
+    }
+    consultation.status = 'ASSIGNED';
+    consultation.assignedStaffId = body.staffId;
     // 리드 전달 시 ③ 제3자 제공 동의 증적 자동 첨부 (감사 대응)
-    return { consultation, attachedConsentId: consultation?.thirdPartyConsentId };
+    return { consultation, attachedConsentId: consultation.thirdPartyConsentId };
   }
 
   @Get('admin/users/:userId/medical')
@@ -222,6 +245,8 @@ export class ApiController {
     @Headers('x-staff-role') role?: StaffRole,
   ) {
     this.requireRole(role, ['CONSULTANT', 'ADJUSTER']);
+    // 대상 사용자의 민감정보 동의가 유효해야 한다 — 철회 후에는 관리자도 열람 불가(하드 룰 3)
+    this.consents.assertSensitiveConsent(userId);
     // 배정 담당자만 열람 + 전건 감사 로그 (하드 룰 3 / §9)
     this.audit.assertCanViewSensitive(staffId ?? '', userId);
     this.audit.record(staffId ?? '', 'VIEW_MEDICAL', userId, 'medical.medical_records');
@@ -230,7 +255,7 @@ export class ApiController {
 
   @Get('admin/audit-logs')
   auditLogs(@Headers('x-staff-role') role?: StaffRole) {
-    this.requireRole(role, ['AUDITOR', 'OPERATOR']);
+    this.requireRole(role, ['AUDITOR']); // 감사 로그는 AUDITOR 전용 (docs/04 §9)
     return this.audit.list();
   }
 
