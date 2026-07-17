@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.env
+.env.local
+coverage/
+.DS_Store
+
+# Flutter
+app/.dart_tool/
+app/build/
+app/.flutter-plugins*
+app/.packages
