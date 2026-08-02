@@ -9,6 +9,7 @@ import { homePage } from '../lib/pages/home.mjs';
 import { categoryPage, blogIndexPage } from '../lib/pages/category.mjs';
 import { articlePage } from '../lib/pages/article.mjs';
 import { glossaryPage } from '../lib/pages/glossary.mjs';
+import { notFoundPage } from '../lib/pages/notfound.mjs';
 import { glossary } from '../content/glossary.mjs';
 import { plain } from '../lib/seo.mjs';
 
@@ -159,6 +160,8 @@ async function main() {
   await write('index.html', homePage(articles));
   await write('blog/index.html', blogIndexPage(articles));
   await write('glossary/index.html', glossaryPage());
+  // GitHub Pages 가 실제 404 상태코드와 함께 반환한다 (소프트 404 방지)
+  await write('404.html', notFoundPage());
 
   for (const cat of categories) {
     await write(`${cat.slug}/index.html`, categoryPage(cat, articles));
@@ -197,6 +200,12 @@ async function main() {
   await write('robots.txt', robots());
   await write('rss.xml', rss(articles));
   await write('llms.txt', llmsTxt(articles));
+
+  // IndexNow: 키가 설정되어 있으면 검증용 키 파일을 함께 배포한다.
+  // 이후 갱신 통지: https://searchadvisor.naver.com/indexnow?url=<URL>&key=<KEY>
+  if (site.indexNowKey) {
+    await write(`${site.indexNowKey}.txt`, site.indexNowKey);
+  }
   // GitHub Pages 가 _ 로 시작하는 경로를 Jekyll 로 처리하지 않도록
   await write('.nojekyll', '');
 

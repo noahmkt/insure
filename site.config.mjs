@@ -22,6 +22,24 @@ export const site = {
     bing: '',
   },
 
+  /**
+   * IndexNow 키 (선택).
+   * 8~128자 hex 문자열. 값을 넣으면 빌드 시 /{key}.txt 파일이 함께 생성되어
+   * 네이버·빙에 콘텐츠 갱신을 즉시 통지할 수 있습니다.
+   * 통지 예: https://searchadvisor.naver.com/indexnow?url=<URL>&key=<KEY>
+   */
+  indexNowKey: '',
+
+  /**
+   * 사이트 연관채널 — 네이버가 Organization/sameAs 로 파싱해 공식 채널을 연결합니다.
+   * 운영 중인 채널 URL만 남기세요. 없는 채널을 적으면 오히려 신뢰도에 해가 됩니다.
+   */
+  sameAs: [
+    // 'https://blog.naver.com/<아이디>',
+    // 'https://www.instagram.com/<아이디>',
+    // 'https://www.youtube.com/@<채널>',
+  ],
+
   // ── 상담 신청(리드) 전송 설정 ──────────────────────────────
   lead: {
     // TODO: 실제 리드 수집 엔드포인트로 교체 (예: 자체 API, Google Apps Script, Formspree 등)

@@ -13,6 +13,14 @@ const problems = [];
 const warnings = [];
 let checked = 0;
 
+// 네이버 웹마스터 가이드 권장치 — title 40자, description 80자 이내
+const NAVER_TITLE_MAX = 40;
+const NAVER_DESC_MAX = 80;
+
+// 중복 title/description 은 네이버에서 중복문서로 분류될 수 있어 전수 검사한다
+const seenTitles = new Map();
+const seenDescs = new Map();
+
 async function htmlFiles(dir) {
   const out = [];
   for (const entry of await readdir(dir)) {
@@ -36,22 +44,46 @@ async function checkPage(file) {
   const warn = (m) => warnings.push(`${name}: ${m}`);
 
   // ── 기본 SEO ────────────────────────────────────────
+  const isNoindex = /<meta name="robots" content="noindex/.test(html);
+
+  const titleTags = html.match(/<title>/g) || [];
+  if (titleTags.length > 1) fail(`title 태그가 ${titleTags.length}개 — 1개여야 함`);
   const title = html.match(/<title>([^<]*)<\/title>/)?.[1] ?? '';
   if (!title) fail('title 태그 없음');
-  else if (title.length > 70) warn(`title 이 김 (${title.length}자) — 검색결과에서 잘릴 수 있음`);
+  else {
+    if (title.length > NAVER_TITLE_MAX)
+      warn(`title ${title.length}자 — 네이버 권장 ${NAVER_TITLE_MAX}자 초과`);
+    if (seenTitles.has(title)) fail(`title 중복: "${title}" (${seenTitles.get(title)} 와 동일)`);
+    else seenTitles.set(title, name);
+  }
 
   const desc = html.match(/<meta name="description" content="([^"]*)"/)?.[1] ?? '';
   if (!desc) fail('meta description 없음');
-  else if (desc.length < 50) warn(`description 이 짧음 (${desc.length}자)`);
-  else if (desc.length > 200) warn(`description 이 김 (${desc.length}자)`);
+  else {
+    if (desc.length > NAVER_DESC_MAX)
+      warn(`description ${desc.length}자 — 네이버 권장 ${NAVER_DESC_MAX}자 초과`);
+    if (seenDescs.has(desc)) fail(`description 중복: ${seenDescs.get(desc)} 와 동일`);
+    else seenDescs.set(desc, name);
+  }
 
-  if (!/<link rel="canonical" href="https?:\/\//.test(html)) fail('canonical 절대 URL 없음');
+  if (!isNoindex && !/<link rel="canonical" href="https?:\/\//.test(html))
+    fail('canonical 절대 URL 없음');
   if (!/<html lang="ko">/.test(html)) fail('html lang 속성 없음');
   if (!/name="viewport"/.test(html)) fail('viewport 메타 없음');
+
+  // 파비콘·OG 이미지는 절대경로여야 네이버 검색결과에 반영된다
+  if (!/<link rel="shortcut icon" href="https?:\/\//.test(html))
+    fail('파비콘이 절대경로로 지정되지 않음');
+  const relIcons = (html.match(/rel="(shortcut icon|icon)"/g) || []).length;
+  if (relIcons > 1) fail('파비콘 rel 중복 — 미반영 원인');
 
   const h1 = html.match(/<h1[^>]*>/g) || [];
   if (h1.length === 0) fail('H1 없음');
   if (h1.length > 1) fail(`H1 이 ${h1.length}개 — 페이지당 1개여야 함`);
+
+  // 네이버 노출을 스스로 막는 태그가 실수로 들어갔는지 확인
+  if (/content="nosourceinfo"/.test(html)) warn('nosourceinfo — AI 출처 설명에서 제외됨');
+  if (/name="naver" content="nosublinks"/.test(html)) warn('nosublinks — 서브링크 노출 제외됨');
 
   // ── 공유 카드 ───────────────────────────────────────
   for (const p of ['og:title', 'og:description', 'og:url', 'og:image', 'og:type']) {
@@ -88,10 +120,12 @@ async function checkPage(file) {
   if (imgsWithoutAlt.length) fail(`alt 없는 img ${imgsWithoutAlt.length}개`);
 
   // ── 리드 폼 (전환) ──────────────────────────────────
-  if (!html.includes('data-lead-form')) warn('상담 폼 없음 — 전환 경로 누락');
-  else {
+  // 404 는 전환 페이지가 아니므로 제외
+  if (html.includes('data-lead-form')) {
     if (!html.includes('name="agree"')) fail('개인정보 동의 체크박스 없음');
     if (!html.includes('보험료 체크하기')) warn('CTA 버튼 문구 없음');
+  } else if (!isNoindex) {
+    warn('상담 폼 없음 — 전환 경로 누락');
   }
 
   // ── 하드 룰: 주민번호 수집 금지 ─────────────────────
@@ -116,9 +150,10 @@ async function checkSiteFiles() {
 
   const sitemap = await readFile(path.join(dist, 'sitemap.xml'), 'utf8').catch(() => '');
   const locs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
-  const pages = (await htmlFiles(dist)).map((f) =>
-    rel(f).replace(/index\.html$/, '').replace(/\\/g, '/'),
-  );
+  const pages = (await htmlFiles(dist))
+    .map((f) => rel(f).replace(/index\.html$/, '').replace(/\\/g, '/'))
+    // 404 는 색인 대상이 아니므로 사이트맵에 넣지 않는다
+    .filter((p) => p !== '404.html');
   for (const p of pages) {
     const expect = `/${p}`.replace(/\/$/, '/');
     if (!locs.some((l) => l.endsWith(expect) || l.endsWith(expect.replace(/\/$/, '')))) {
