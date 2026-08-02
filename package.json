@@ -1,0 +1,12 @@
+{
+  "name": "insurance-compare-site",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "보험 비교 리드젠 사이트 — SEO/AEO/GEO 최적화 정적 사이트 생성기",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "serve": "node scripts/serve.mjs",
+    "check": "node scripts/check-seo.mjs"
+  }
+}

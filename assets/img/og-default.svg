@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#EAF1FD"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect x="72" y="86" width="120" height="44" rx="22" fill="#1B64DA"/>
+  <text x="132" y="116" font-family="system-ui, sans-serif" font-size="20" font-weight="700" fill="#fff" text-anchor="middle">보험비교</text>
+  <text x="72" y="230" font-family="system-ui, sans-serif" font-size="72" font-weight="800" fill="#14161A">34개 보험사 보험료를</text>
+  <text x="72" y="320" font-family="system-ui, sans-serif" font-size="72" font-weight="800" fill="#1B64DA">한 번에 비교하세요</text>
+  <text x="72" y="400" font-family="system-ui, sans-serif" font-size="30" fill="#3F454E">암보험 · 실손보험 · 운전자보험 · 치아보험 · 어린이보험</text>
+  <text x="72" y="450" font-family="system-ui, sans-serif" font-size="30" fill="#3F454E">무료 상담으로 내 조건에 맞는 견적을 확인하세요</text>
+  <rect x="72" y="510" width="240" height="60" rx="12" fill="#1B64DA"/>
+  <text x="192" y="549" font-family="system-ui, sans-serif" font-size="24" font-weight="700" fill="#fff" text-anchor="middle">보험료 체크하기</text>
+</svg>

@@ -1,4 +1,4 @@
-name: Deploy GitHub Pages
+name: Deploy to GitHub Pages
 
 on:
   push:
@@ -24,19 +24,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Build admin web (relative base for project pages)
-        working-directory: admin
-        run: |
-          npm ci
-          npx vite build --base=./
-      - name: Assemble site
-        run: |
-          mkdir -p site/admin
-          cp pages/index.html site/
-          cp -r admin/dist/* site/admin/
+
+      - name: Build static site
+        run: node scripts/build.mjs
+
+      - name: Verify SEO/AEO requirements
+        run: node scripts/check-seo.mjs
+
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: dist
 
   deploy:
     needs: build
